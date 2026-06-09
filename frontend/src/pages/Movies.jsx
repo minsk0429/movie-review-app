@@ -24,18 +24,9 @@ export default function Movies() {
     setMovies(res.data);
   };
 
-  const fetchGenres = async () => {
-    const res = await api.get('/movies/');
-    const allGenres = [];
-    res.data.forEach(m => m.genres.forEach(g => {
-      if (!allGenres.find(x => x.id === g.id)) allGenres.push(g);
-    }));
-    setGenres(allGenres);
-  };
-
   useEffect(() => {
     fetchMovies();
-    fetchGenres();
+    api.get('/genres/').then(r => setGenres(r.data));
   }, []);
 
   const submitMovie = async (e) => {
@@ -50,7 +41,6 @@ export default function Movies() {
       setForm({ title: '', director: '', release_year: '', description: '', genre_ids: [] });
       setShowForm(false);
       fetchMovies();
-      fetchGenres();
     } catch (err) {
       setFormError(err.response?.data?.detail || '영화 등록 실패');
     }

@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .routers import users, movies, reviews, watchlist
+from .routers import users, movies, reviews, watchlist, genres
 
 app = FastAPI(title="🎬 Movie Review API", version="1.0.0")
 
@@ -16,6 +16,7 @@ app.include_router(users.router)
 app.include_router(movies.router)
 app.include_router(reviews.router)
 app.include_router(watchlist.router)
+app.include_router(genres.router)
 
 @app.get("/")
 def root():
