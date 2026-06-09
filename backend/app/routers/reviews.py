@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, text
 from typing import List
 from .. import models, schemas, auth
 from ..database import get_db
@@ -41,7 +41,13 @@ def create_review(
         raise HTTPException(status_code=400, detail="이미 리뷰를 작성했습니다.")
 
     try:
-        # ── 트랜잭션 시작 ──────────────────────────────
+        # ── Isolation Level: REPEATABLE READ 설정 ──────────────────
+        # 동일 트랜잭션 내에서 avg_rating을 두 번 읽어도 일관된 값을 보장
+        # Non-Repeatable Read 방지 → 정확한 평균 평점 계산 보장
+        db.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ"))
+
+        # ── 트랜잭션 시작 ───────────────────────────────────────────
+        # 1) 리뷰 저장
         review = models.Review(
             user_id  = current_user.id,
             movie_id = movie_id,
@@ -49,16 +55,19 @@ def create_review(
             content  = review_in.content,
         )
         db.add(review)
-        db.flush()  # review.id 확보
+        db.flush()  # review.id 확보 (아직 커밋 전)
 
-        # 평균 평점 업데이트 (리뷰 저장 + avg_rating 업데이트 = 하나의 트랜잭션)
+        # 2) 평균 평점 업데이트
+        # 리뷰 저장 + avg_rating 갱신이 하나의 트랜잭션으로 처리됨
+        # → 둘 중 하나만 성공하는 상황 방지 (원자성 보장)
         avg = db.query(func.avg(models.Review.rating)).filter(
             models.Review.movie_id == movie_id
         ).scalar()
         movie.avg_rating = round(float(avg), 2)
 
         db.commit()
-        # ── 트랜잭션 종료 ──────────────────────────────
+        # ── 트랜잭션 종료 ───────────────────────────────────────────
+
         db.refresh(review)
     except Exception as e:
         db.rollback()
@@ -85,6 +94,10 @@ def delete_review(
     if not review:
         raise HTTPException(status_code=404, detail="리뷰를 찾을 수 없습니다.")
     try:
+        # ── Isolation Level: REPEATABLE READ 설정 ──────────────────
+        db.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ"))
+
+        # ── 트랜잭션: 리뷰 삭제 + 평균 평점 재계산 ─────────────────
         db.delete(review)
         db.flush()
         avg = db.query(func.avg(models.Review.rating)).filter(
@@ -93,6 +106,7 @@ def delete_review(
         movie = db.query(models.Movie).filter(models.Movie.id == movie_id).first()
         movie.avg_rating = round(float(avg), 2) if avg else 0.00
         db.commit()
+        # ── 트랜잭션 종료 ───────────────────────────────────────────
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"삭제 중 오류: {str(e)}")
